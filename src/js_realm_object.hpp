@@ -134,6 +134,8 @@ typename T::Object RealmObjectClass<T>::create_instance(ContextType ctx, realm::
     auto schema = realm_object.get_object_schema();
     auto name = schema.name;
 
+    print("Creating an instance of '%s' Realm Object", name.c_str());
+
     auto internal = new realm::js::RealmObject<T>(std::move(realm_object));
 
     try {

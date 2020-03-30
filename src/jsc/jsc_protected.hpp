@@ -19,6 +19,7 @@
 #pragma once
 
 #include "jsc_types.hpp"
+#include "platform.hpp"
 
 namespace realm {
 namespace js {
@@ -77,6 +78,8 @@ class Protected<JSValueRef> {
     }
 
     ~Protected() {
+        realm::print("Destroying protected JSValueRef %p", m_value);
+
         if (m_value) {
             JSValueUnprotect(m_context, m_value);
         }

@@ -20,6 +20,7 @@
 
 #include "jsc_types.hpp"
 
+#include "platform.hpp"
 #include "js_class.hpp"
 #include "js_util.hpp"
 
@@ -41,9 +42,29 @@ static js::Protected<JSObjectRef> FunctionPrototype;
 static js::Protected<JSObjectRef> RealmObjectClassConstructor;
 static js::Protected<JSObjectRef> RealmObjectClassConstructorPrototype;
 
+static inline std::string JSStringToStdString(JSStringRef jsString) {
+    size_t maxBufferSize = JSStringGetMaximumUTF8CStringSize(jsString);
+    char* utf8Buffer = new char[maxBufferSize];
+    size_t bytesWritten = JSStringGetUTF8CString(jsString, utf8Buffer, maxBufferSize);
+    std::string utf_string = std::string(utf8Buffer, bytesWritten -1);
+    delete [] utf8Buffer;
+    return utf_string;
+}
+
+static inline std::string JSValueToStdString(JSContextRef ctx, JSValueRef jsValue) {
+    JSValueRef exception = nullptr;
+    JSStringRef jsString = JSValueToStringCopy(ctx, jsValue, &exception);
+    if (exception) {
+        throw jsc::Exception(ctx, exception);
+    }
+    return JSStringToStdString(jsString);
+}
+
 static inline void jsc_class_init(JSContextRef ctx, JSObjectRef globalObject) {
+    print("jsc_class_init called");
     //handle ReactNative app refresh by reseting the cached constructor values
     if (RealmObjectClassConstructor) {
+        print("jsc_class_init: resetting RealmObjectClassConstructor");
         RealmObjectClassConstructor = js::Protected<JSObjectRef>();
     }
 
@@ -95,12 +116,22 @@ class ObjectWrap {
     static JSObjectRef create_constructor(JSContextRef ctx) {
         bool isRealmObjectClass = std::is_same<ClassType, realm::js::RealmObjectClass<realm::jsc::Types>>::value;
         if (isRealmObjectClass) {
-             if (RealmObjectClassConstructor) {
-                 return RealmObjectClassConstructor;
-             }
+            /*
+            if (RealmObjectClassConstructor) {
+                return RealmObjectClassConstructor;
+            }
+            */
 
             JSObjectRef constructor = JSObjectMake(ctx, get_constructor_class(ctx), nullptr);
             RealmObjectClassConstructor = js::Protected<JSObjectRef>(ctx, constructor);
+            
+            realm::print(
+                "RealmObjectClassConstructor is assigned %s (%p / %p) (global_ctx = %p)",
+                JSValueToStdString(ctx, RealmObjectClassConstructor).c_str(),
+                constructor,
+                &RealmObjectClassConstructor,
+                JSContextGetGlobalContext(ctx)
+            );
             
             JSValueRef value = Object::get_property(ctx, RealmObjectClassConstructor, "prototype");
             RealmObjectClassConstructorPrototype = js::Protected<JSObjectRef>(ctx, Value::to_object(ctx, value));
@@ -268,7 +299,7 @@ inline JSClassRef ObjectWrap<ClassType>::create_constructor_class() {
     definition.attributes = kJSClassAttributeNoAutomaticPrototype;
     definition.className = "Function";
     definition.initialize = initialize_constructor;
-    definition.hasInstance = has_instance;
+    // definition.hasInstance = has_instance;
 
     // This must be set for `typeof constructor` to be 'function'.
     definition.callAsFunction = call;
@@ -596,7 +627,7 @@ bool ObjectWrap<ClassType>::has_instance(JSContextRef ctx, JSValueRef value) {
         JSValueRef error = nullptr;
         JSObjectRef object = JSValueToObject(ctx, value, &error);
         if (error) {
-            //do not throw exceptions in 'instanceof' calls
+            // do not throw exceptions in 'instanceof' calls
             return false;
         }
 
@@ -678,9 +709,12 @@ inline JSObjectRef ObjectWrap<ClassType>::create_instance_by_schema(JSContextRef
     //if we are creating a RealmObject from schema with no user defined constructor
 	if (constructor == nullptr) {
         if (!schemaObjects->count(schemaName)) {
+            // Re-creating the constructor ...
+            // create_constructor(ctx);
             
             JSClassDefinition definition = kJSClassDefinitionEmpty;
             definition.className = schema.name.c_str();
+            // definition.parentClass = get_constructor_class(ctx);
             JSClassRef schemaClass = JSClassCreate(&definition);
             schemaObjectConstructor = JSObjectMakeConstructor(ctx, schemaClass, nullptr);
             value = Object::get_property(ctx, schemaObjectConstructor, "prototype");
@@ -688,6 +722,19 @@ inline JSObjectRef ObjectWrap<ClassType>::create_instance_by_schema(JSContextRef
 
             JSObjectSetPrototype(ctx, constructorPrototype, RealmObjectClassConstructorPrototype);
             JSObjectSetPrototype(ctx, schemaObjectConstructor, RealmObjectClassConstructor);
+
+            if (JSValueIsNull(ctx, RealmObjectClassConstructor)) {
+                print("create_instance_by_schema: RealmObjectClassConstructor is null!");
+            } else {
+                print("create_instance_by_schema: RealmObjectClassConstructor is not null!");
+            }
+
+            print(
+                "RealmObjectClassConstructor = %s (%p) (global_ctx = %p)",
+                JSValueToStdString(ctx, RealmObjectClassConstructor).c_str(),
+                &RealmObjectClassConstructor,
+                JSContextGetGlobalContext(ctx)
+            );
 
             define_schema_properties(ctx, constructorPrototype, schema, true);
 
